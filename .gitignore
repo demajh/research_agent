@@ -1,0 +1,8 @@
+.runs/
+.venv/
+__pycache__/
+*.egg-info/
+*.pyc
+.env
+configs/interests.yaml
+*.db

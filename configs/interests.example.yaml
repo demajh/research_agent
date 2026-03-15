@@ -1,0 +1,44 @@
+pipeline:
+  lookback_hours: 24
+  max_papers_per_interest: 10
+  require_human_approval_for_execution: false
+  dry_run: true
+
+llm:
+  model_name: claude-sonnet-4-20250514
+  temperature: 0.0
+
+github:
+  token_env: GITHUB_TOKEN
+
+# Set enabled: false to keep artifacts local only (no S3 upload).
+# When disabled, bucket/region/endpoint are ignored.
+storage:
+  enabled: false
+  bucket: your-datalake-bucket
+  prefix: arxiv-method-agent
+  region: us-west-2
+  endpoint_url_env: S3_ENDPOINT_URL
+
+email:
+  smtp_host: smtp.example.com
+  smtp_port: 587
+  username_env: SMTP_USERNAME
+  password_env: SMTP_PASSWORD
+  from_email: research-bot@example.com
+  to:
+    - your.name@example.com
+
+interests:
+  - name: graph machine learning
+    description: New methods for graph representation learning, graph transformers, graph foundation models, node classification, link prediction, and molecular graphs.
+    keywords:
+      - graph neural network
+      - graph transformer
+      - node classification
+      - graph representation
+      - molecule graph
+    benchmark:
+      id: generic_python_demo
+      metric_name: success
+      run_timeout_seconds: 1800
