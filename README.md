@@ -1,10 +1,10 @@
-# arXiv Method Scout
+# Research agent
 
-An automated pipeline that monitors arXiv daily for new AI/ML papers, triages them against your research interests using an LLM, and—when a paper ships code—builds a Docker container and runs a small benchmark to verify the method actually works. Results are delivered as a daily email digest.
+An agent that monitors arXiv daily for new AI/ML papers, triages them against your research interests using an LLM, and—when a paper ships code—builds a Docker container and runs a small benchmark to verify the method actually works. Results are delivered as a daily email digest.
 
 ## Why this exists
 
-Keeping up with arXiv is a full-time job. Hundreds of papers land every day across cs.LG, cs.AI, and stat.ML alone. Most researchers cope by skimming titles, relying on Twitter, or checking a handful of curated feeds. All of these miss papers that matter to *your* specific interests.
+Hundreds of papers are published per day arXiv in a given research area. Most researchers cope by skimming titles, relying on Twitter, or checking a handful of curated feeds. All of these miss papers that matter to *your* specific interests.
 
 This project automates the grunt work:
 
