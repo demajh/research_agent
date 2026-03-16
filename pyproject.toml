@@ -22,6 +22,8 @@ dependencies = [
   "requests>=2.32",
   "tenacity>=9.0",
   "typing-extensions>=4.12",
+  "google-auth>=2.0",
+  "google-api-python-client>=2.0",
 ]
 
 [tool.setuptools]

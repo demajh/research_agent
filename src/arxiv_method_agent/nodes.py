@@ -17,7 +17,7 @@ from .docker_runner import DockerRunner
 from .emailer import EmailClient
 from .github_client import GitHubClient
 from .llm import LLMClient
-from .prompts import benchmark_plan_prompt, triage_prompt
+from .prompts import benchmark_plan_prompt, benchmark_summary_prompt, triage_prompt
 from .schemas import BenchmarkPlan, BenchmarkResult, EmailPayload, InterestReport, PaperOutcome, PaperRecord, PaperTriage
 from .storage import StorageClient
 from .utils import ensure_dir, log_duration, lookback_window, safe_read_text, slugify, truncate
@@ -75,7 +75,11 @@ class WorkflowContext:
     def fetch_candidates(self) -> list[dict]:
         with log_duration("arXiv candidate fetch", logger):
             start_dt, end_dt = lookback_window(self.cfg.pipeline.lookback_hours)
-            papers = self.arxiv.fetch_recent_papers(start_dt=start_dt, end_dt=end_dt)
+            papers = self.arxiv.fetch_recent_papers(
+                start_dt=start_dt,
+                end_dt=end_dt,
+                categories=self.cfg.pipeline.categories,
+            )
             logger.info("Fetched %d candidate papers", len(papers))
             return [p.model_dump(mode="json") for p in papers]
 
@@ -104,82 +108,113 @@ class WorkflowContext:
                 if not triage.relevant:
                     continue
 
+                # Paper is relevant — now search for a GitHub repo
+                repo_url = self.arxiv.find_repo_url(paper)
+                if not repo_url:
+                    logger.info("No repo found for relevant paper %s, skipping", paper.arxiv_id)
+                    continue
+
                 outcome = PaperOutcome(paper=paper, triage=triage, interest_name=interest.name)
+                outcome.repo_url = repo_url
 
                 # Per-paper output directory: papers/<interest>/<arxiv_id>/
                 paper_dir = ensure_dir(run_dir / "papers" / interest_slug / paper.arxiv_id)
 
-                repo_url = paper.repo_url or self.github.search_repo(paper)
-                outcome.repo_url = repo_url
+                try:
+                    repo_inspection = self.github.clone_and_inspect(
+                        repo_url,
+                        workdir=workspace / "repos",
+                    )
+                    outcome.repo_inspection = repo_inspection
 
-                if repo_url:
-                    try:
-                        repo_inspection = self.github.clone_and_inspect(
-                            repo_url,
-                            workdir=workspace / "repos",
-                        )
-                        outcome.repo_inspection = repo_inspection
+                    assets = self.registry.build_assets(
+                        interest.benchmark.id,
+                        base_dir=workspace / "benchmark_assets",
+                    )
+                    plan = self.llm.structured(
+                        benchmark_plan_prompt(
+                            interest_name=interest.name,
+                            paper_title=paper.title,
+                            paper_summary=paper.summary,
+                            benchmark_description=assets.description,
+                            inspection=repo_inspection,
+                        ),
+                        BenchmarkPlan,
+                    )
+                    outcome.benchmark_plan = plan
 
-                        assets = self.registry.build_assets(
-                            interest.benchmark.id,
-                            base_dir=workspace / "benchmark_assets",
-                        )
-                        plan = self.llm.structured(
-                            benchmark_plan_prompt(
-                                interest_name=interest.name,
-                                paper_title=paper.title,
-                                paper_summary=paper.summary,
-                                benchmark_description=assets.description,
-                                inspection=repo_inspection,
-                            ),
-                            BenchmarkPlan,
-                        )
-                        outcome.benchmark_plan = plan
-
-                        if plan.benchmarkable:
-                            if self.cfg.pipeline.require_human_approval_for_execution:
-                                approval = interrupt(
-                                    {
-                                        "type": "benchmark_execution_approval",
-                                        "interest": interest.name,
-                                        "paper": paper.title,
-                                        "repo_url": repo_url,
-                                        "reason": plan.reason,
-                                        "setup_commands": plan.setup_commands,
-                                        "run_commands": plan.run_commands,
-                                    }
-                                )
-                                if not approval:
-                                    self._write_paper_json(paper_dir, outcome)
-                                    report.papers.append(outcome)
-                                    if len(report.papers) >= max_items:
-                                        break
-                                    continue
-
-                            result = self.docker.run_plan(
-                                plan=plan,
-                                repo_path=repo_inspection.local_path,
-                                benchmark_assets_dir=assets.dataset_dir,
-                                artifact_dir=paper_dir,
-                                context_dir=workspace / "docker_contexts" / slugify(paper.arxiv_id),
-                                image_tag=f"arxiv-method-agent:{slugify(paper.arxiv_id)}",
-                                timeout_seconds=interest.benchmark.run_timeout_seconds,
+                    if plan.benchmarkable:
+                        if self.cfg.pipeline.require_human_approval_for_execution:
+                            approval = interrupt(
+                                {
+                                    "type": "benchmark_execution_approval",
+                                    "interest": interest.name,
+                                    "paper": paper.title,
+                                    "repo_url": repo_url,
+                                    "reason": plan.reason,
+                                    "setup_commands": plan.setup_commands,
+                                    "run_commands": plan.run_commands,
+                                }
                             )
-                            if result.local_artifact_dir and self.cfg.storage.enabled:
-                                bucket_uri = self.storage.upload_tree(
-                                    result.local_artifact_dir,
-                                    run_id=run_id,
-                                    interest_name=interest.name,
-                                    paper_id=paper.arxiv_id,
-                                )
-                                result.bucket_uri = bucket_uri
-                            outcome.benchmark_result = result
-                    except Exception as exc:
-                        logger.warning("Benchmark failed for paper %s: %s", paper.arxiv_id, exc)
-                        outcome.benchmark_result = BenchmarkResult(
-                            status="error",
-                            reason=f"benchmark planning or execution failed: {exc}",
+                            if not approval:
+                                self._write_paper_json(paper_dir, outcome)
+                                report.papers.append(outcome)
+                                if len(report.papers) >= max_items:
+                                    break
+                                continue
+
+                        result = self.docker.run_plan(
+                            plan=plan,
+                            repo_path=repo_inspection.local_path,
+                            benchmark_assets_dir=assets.dataset_dir,
+                            artifact_dir=paper_dir,
+                            context_dir=workspace / "docker_contexts" / slugify(paper.arxiv_id),
+                            image_tag=f"arxiv-method-agent:{slugify(paper.arxiv_id)}",
+                            timeout_seconds=interest.benchmark.run_timeout_seconds,
                         )
+                        if result.local_artifact_dir and self.cfg.storage.enabled:
+                            bucket_uri = self.storage.upload_tree(
+                                result.local_artifact_dir,
+                                run_id=run_id,
+                                interest_name=interest.name,
+                                paper_id=paper.arxiv_id,
+                            )
+                            result.bucket_uri = bucket_uri
+
+                        # Generate a human-readable summary of the benchmark run
+                        run_log = ""
+                        if result.run_log_path:
+                            run_log = safe_read_text(result.run_log_path, max_chars=8000)
+                            # Take last 100 lines
+                            lines = run_log.splitlines()
+                            if len(lines) > 100:
+                                run_log = "\n".join(lines[-100:])
+                        try:
+                            result.summary = self.llm.text(
+                                benchmark_summary_prompt(
+                                    paper_title=paper.title,
+                                    plan=plan,
+                                    run_log=run_log,
+                                    metrics=result.metrics,
+                                    status=result.status,
+                                )
+                            )
+                        except Exception as exc:
+                            logger.debug("Failed to generate benchmark summary: %s", exc)
+
+                        outcome.benchmark_result = result
+                    else:
+                        logger.info("Repo not benchmarkable for %s: %s", paper.arxiv_id, plan.reason)
+                        outcome.benchmark_result = BenchmarkResult(
+                            status="skipped",
+                            reason=plan.reason,
+                        )
+                except Exception as exc:
+                    logger.warning("Benchmark failed for paper %s: %s", paper.arxiv_id, exc)
+                    outcome.benchmark_result = BenchmarkResult(
+                        status="error",
+                        reason=f"benchmark execution failed: {exc}",
+                    )
 
                 self._write_paper_json(paper_dir, outcome)
                 report.papers.append(outcome)
@@ -229,28 +264,35 @@ class WorkflowContext:
                 paper = outcome.paper
                 html_parts.append(f"<h3>{paper.title}</h3>")
                 html_parts.append(
-                    f"<p><strong>arXiv</strong>: <a href=\"{paper.abs_url or '#'}\">{paper.arxiv_id}</a></p>"
-                )
-                html_parts.append(f"<p><strong>Value</strong>: {triage.value_summary}</p>")
-                html_parts.append(f"<p><strong>How it works</strong>: {triage.how_it_works}</p>")
-                html_parts.append(
-                    f"<p><strong>Expected vs SOTA</strong>: {triage.expected_vs_sota}</p>"
-                )
-                html_parts.append(
-                    f"<p><strong>Implementation status</strong>: {triage.implementation_status} — {triage.implementation_reason}</p>"
+                    f"<p><strong>arXiv</strong>: <a href=\"{paper.abs_url or '#'}\">{paper.arxiv_id}</a>"
                 )
                 if outcome.repo_url:
                     html_parts.append(
-                        f"<p><strong>Repo</strong>: <a href=\"{outcome.repo_url}\">{outcome.repo_url}</a></p>"
+                        f" &nbsp;|&nbsp; <strong>Repo</strong>: <a href=\"{outcome.repo_url}\">{outcome.repo_url}</a>"
                     )
-                if outcome.benchmark_result:
-                    br = outcome.benchmark_result
-                    metric_text = (
-                        f"{br.metric_name}={br.metric_value}" if br.metric_name and br.metric_value is not None else br.reason or br.status
-                    )
-                    html_parts.append(
-                        f"<p><strong>Benchmark result</strong>: {br.status} ({metric_text})</p>"
-                    )
+                html_parts.append("</p>")
+                html_parts.append(f"<p><strong>Why it matters</strong>: {triage.value_summary}</p>")
+                html_parts.append(f"<p><strong>How it works</strong>: {triage.how_it_works}</p>")
+                html_parts.append(
+                    f"<p><strong>Reported results</strong>: {triage.expected_vs_sota}</p>"
+                )
+                # Benchmark execution results
+                br = outcome.benchmark_result
+                if br:
+                    status_color = {"passed": "#2e7d32", "failed": "#c62828", "error": "#e65100", "skipped": "#666"}.get(br.status, "#333")
+                    if br.summary:
+                        html_parts.append(
+                            f"<p><strong>Benchmark</strong> "
+                            f"<span style=\"color:{status_color};font-weight:bold\">[{br.status.upper()}]</span>: "
+                            f"{br.summary}</p>"
+                        )
+                    else:
+                        reason_text = br.reason or br.status
+                        html_parts.append(
+                            f"<p><strong>Benchmark</strong>: "
+                            f"<span style=\"color:{status_color};font-weight:bold\">{br.status.upper()}</span>"
+                            f" &mdash; {reason_text}</p>"
+                        )
                     if br.bucket_uri:
                         html_parts.append(
                             f"<p><strong>Artifacts</strong>: <code>{br.bucket_uri}</code></p>"
@@ -263,20 +305,27 @@ class WorkflowContext:
                     [
                         f"- {paper.title}",
                         f"  arXiv: {paper.arxiv_id}",
-                        f"  Value: {triage.value_summary}",
-                        f"  How it works: {triage.how_it_works}",
-                        f"  Expected vs SOTA: {triage.expected_vs_sota}",
-                        f"  Implementation: {triage.implementation_status} — {triage.implementation_reason}",
                     ]
                 )
                 if outcome.repo_url:
                     text_parts.append(f"  Repo: {outcome.repo_url}")
+                text_parts.extend(
+                    [
+                        f"",
+                        f"  Why it matters: {triage.value_summary}",
+                        f"",
+                        f"  How it works: {triage.how_it_works}",
+                        f"",
+                        f"  Reported results: {triage.expected_vs_sota}",
+                        f"",
+                    ]
+                )
                 if outcome.benchmark_result:
                     br = outcome.benchmark_result
-                    metric_text = (
-                        f"{br.metric_name}={br.metric_value}" if br.metric_name and br.metric_value is not None else br.reason or br.status
-                    )
-                    text_parts.append(f"  Benchmark: {br.status} ({metric_text})")
+                    if br.summary:
+                        text_parts.append(f"  Benchmark [{br.status.upper()}]: {br.summary}")
+                    else:
+                        text_parts.append(f"  Benchmark: {br.status.upper()} — {br.reason or br.status}")
                     if br.bucket_uri:
                         text_parts.append(f"  Artifacts: {br.bucket_uri}")
                 text_parts.append("")
@@ -321,8 +370,6 @@ class WorkflowContext:
                 "value_summary": triage.value_summary,
                 "how_it_works": triage.how_it_works,
                 "expected_vs_sota": triage.expected_vs_sota,
-                "implementation_status": triage.implementation_status,
-                "implementation_reason": triage.implementation_reason,
             },
             "repo_url": outcome.repo_url,
         }

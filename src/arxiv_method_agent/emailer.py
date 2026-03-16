@@ -36,3 +36,4 @@ class EmailClient:
             server.starttls()
             server.login(self.username, self.password)
             server.send_message(msg)
+        logger.info("Email sent to %s", ", ".join(self.cfg.to))

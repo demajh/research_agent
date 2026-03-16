@@ -26,10 +26,13 @@ def format_arxiv_timestamp(dt: datetime) -> str:
 
 def lookback_window(hours: int) -> tuple[datetime, datetime]:
     end = utc_now()
-    # arXiv doesn't publish on weekends. If today is Saturday or Sunday,
-    # shift the window back to cover the most recent weekday.
+    # arXiv doesn't publish on weekends, and Monday's new listings don't
+    # appear until ~01:00 UTC Tuesday.  Shift the window back so it always
+    # covers the most recent weekday with actual publications.
     weekday = end.weekday()  # 0=Mon ... 4=Fri, 5=Sat, 6=Sun
-    if weekday == 5:  # Saturday -> back to Friday
+    if weekday == 0:  # Monday -> back to Friday
+        end = end - timedelta(days=3)
+    elif weekday == 5:  # Saturday -> back to Friday
         end = end - timedelta(days=1)
     elif weekday == 6:  # Sunday -> back to Friday
         end = end - timedelta(days=2)

@@ -3,6 +3,8 @@ pipeline:
   max_papers_per_interest: 10
   require_human_approval_for_execution: false
   dry_run: true
+  # arXiv categories to search (defaults shown below)
+  # categories: [cs.LG, cs.AI, cs.CV, cs.CL, stat.ML]
 
 llm:
   model_name: claude-sonnet-4-20250514
@@ -20,12 +22,15 @@ storage:
   region: us-west-2
   endpoint_url_env: S3_ENDPOINT_URL
 
+# Gmail SMTP with app password.
+# Set GMAIL_USER and GMAIL_PW environment variables.
+# To generate an app password: https://myaccount.google.com/apppasswords
 email:
-  smtp_host: smtp.example.com
+  smtp_host: smtp.gmail.com
   smtp_port: 587
-  username_env: SMTP_USERNAME
-  password_env: SMTP_PASSWORD
-  from_email: research-bot@example.com
+  username_env: GMAIL_USER
+  password_env: GMAIL_PW
+  from_email: your.email@gmail.com
   to:
     - your.name@example.com
 

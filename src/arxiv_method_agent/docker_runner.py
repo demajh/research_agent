@@ -60,14 +60,6 @@ DENY_PATTERNS = [
     "telnet ",
 ]
 
-ALLOWED_BASE_IMAGES = [
-    "python:",
-    "nvidia/cuda:",
-    "ubuntu:",
-    "debian:",
-    "continuumio/miniconda",
-    "pytorch/pytorch:",
-]
 
 
 def _check_symlinks(src: Path) -> None:
@@ -97,11 +89,6 @@ class DockerRunner:
                 if pattern in lowered:
                     raise ValueError(f"Unsafe command rejected by policy: {cmd}")
 
-        if not any(plan.base_image.startswith(prefix) for prefix in ALLOWED_BASE_IMAGES):
-            raise ValueError(
-                f"Base image '{plan.base_image}' is not in the allowlist. "
-                f"Allowed prefixes: {ALLOWED_BASE_IMAGES}"
-            )
 
     def cleanup(self) -> None:
         """Kill and remove all tracked containers. Called on shutdown."""
@@ -291,8 +278,20 @@ class DockerRunner:
             except Exception:
                 metrics = {}
 
+        # Determine status: container must exit 0 to pass
+        if status_code != 0:
+            final_status = "failed"
+            reason = f"Container exited with code {status_code}"
+        elif not metrics_local_path.exists():
+            final_status = "failed"
+            reason = "Container exited 0 but no metrics file produced"
+        else:
+            final_status = "passed"
+            reason = None
+
         return BenchmarkResult(
-            status="passed" if metric_value is not None or metrics_local_path.exists() else "failed",
+            status=final_status,
+            reason=reason,
             metric_name=metric_name,
             metric_value=metric_value,
             metrics=metrics,

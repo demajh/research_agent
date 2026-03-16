@@ -30,6 +30,11 @@ class PipelineConfig(BaseModel):
     require_human_approval_for_execution: bool = False
     dry_run: bool = False
     retention_days: int = 30
+    dedup: bool = True
+    categories: List[str] = Field(
+        default_factory=lambda: ["cs.LG", "cs.AI", "cs.CV", "cs.CL", "stat.ML"],
+        description="arXiv categories to search",
+    )
 
 
 class LLMConfig(BaseModel):
@@ -56,10 +61,10 @@ class StorageConfig(BaseModel):
 
 
 class EmailConfig(BaseModel):
-    smtp_host: str
+    smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
-    username_env: str = "SMTP_USERNAME"
-    password_env: str = "SMTP_PASSWORD"
+    username_env: str = "GMAIL_USER"
+    password_env: str = "GMAIL_PW"
     from_email: str
     to: List[str]
 

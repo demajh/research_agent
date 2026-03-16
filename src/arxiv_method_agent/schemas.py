@@ -25,12 +25,6 @@ class PaperTriage(BaseModel):
     relevant: bool
     relevance_score: float = Field(ge=0.0, le=1.0)
     relevance_reason: str
-    implementation_status: Literal[
-        "repo_available",
-        "implementable_from_paper",
-        "not_implementable",
-    ]
-    implementation_reason: str
     likely_benchmark_family: Literal[
         "generic_python_demo",
         "tabular_binary_classification",
@@ -38,9 +32,15 @@ class PaperTriage(BaseModel):
         "text_classification",
         "unknown",
     ]
-    value_summary: str
-    how_it_works: str
-    expected_vs_sota: str
+    value_summary: str = Field(
+        description="3-5 sentences on what problem this solves and why a practitioner should care. Include specific quantitative claims."
+    )
+    how_it_works: str = Field(
+        description="4-8 sentences giving a technical explanation of the method with precise terminology."
+    )
+    expected_vs_sota: str = Field(
+        description="2-4 sentences with SPECIFIC NUMBERS from the abstract. Quote metrics, baselines, and deltas. Never say 'likely competitive'."
+    )
 
 
 class RepoInspection(BaseModel):
@@ -67,6 +67,7 @@ class BenchmarkPlan(BaseModel):
 
 class BenchmarkResult(BaseModel):
     status: Literal["passed", "failed", "error", "skipped"]
+    summary: Optional[str] = None
     metric_name: Optional[str] = None
     metric_value: Optional[float] = None
     metrics: Dict[str, Any] = Field(default_factory=dict)

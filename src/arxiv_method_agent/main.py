@@ -70,7 +70,6 @@ def _write_run_outputs(run_dir: Path, result: dict, cfg, started_at: datetime) -
                 "value_summary": outcome.triage.value_summary,
                 "how_it_works": outcome.triage.how_it_works,
                 "expected_vs_sota": outcome.triage.expected_vs_sota,
-                "implementation_status": outcome.triage.implementation_status,
                 "repo_url": outcome.repo_url,
                 "benchmark_status": None,
                 "metric_name": None,
@@ -119,7 +118,11 @@ def run_pipeline(config_path: str) -> None:
     work_root = Path(".runs")
     work_root.mkdir(parents=True, exist_ok=True)
     db_path = str(work_root / "agent.db")
-    dedup = DeduplicationTracker(db_path)
+    if cfg.pipeline.dedup:
+        dedup = DeduplicationTracker(db_path)
+    else:
+        dedup = None
+        logger.info("Deduplication disabled")
     ctx = WorkflowContext(cfg, work_root=work_root, dedup=dedup)
     graph = build_graph(ctx, db_path=db_path)
 
@@ -161,7 +164,8 @@ def run_pipeline(config_path: str) -> None:
         logger.info("Results saved to %s", run_dir)
     finally:
         ctx.docker.cleanup()
-        dedup.close()
+        if dedup:
+            dedup.close()
         _cleanup_old_runs(work_root, cfg.pipeline.retention_days)
 
 

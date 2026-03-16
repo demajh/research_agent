@@ -37,9 +37,18 @@ class BenchmarkRegistry:
         write_json(
             out / "instructions.json",
             {
-                "goal": "Verify that the repo installs and a basic command can run.",
+                "goal": (
+                    "Run the repo's own demo, example, or inference script on a small input and "
+                    "capture real output metrics. Do NOT just check that the repo installs — actually "
+                    "run it and report what it produces."
+                ),
                 "output_contract": "Write JSON metrics to /workspace/out/metrics.json",
-                "example_metric": {"success": 1.0},
+                "metric_guidelines": (
+                    "Report metrics that reflect actual model output. For example: inference time, "
+                    "output shape, accuracy on demo data, loss value, number of parameters, FLOPs, "
+                    "throughput (samples/sec), or any numeric result the repo's scripts produce. "
+                    "Do NOT report {'success': 1.0} — that tells the reader nothing."
+                ),
             },
         )
         return BenchmarkAssets(
@@ -47,8 +56,13 @@ class BenchmarkRegistry:
             metric_name="success",
             dataset_dir=out,
             description=(
-                "Smoke benchmark only. It is acceptable to validate installability, importability, or a tiny example run. "
-                "The plan must still create /workspace/out/metrics.json."
+                "Run the repo's own demo, example, or inference script and capture real output. "
+                "Look for scripts like demo.py, example.py, inference.py, test.py, or a README "
+                "quick-start command. Run it on a small input (single image, short sequence, tiny "
+                "batch) and capture quantitative output: inference time, output shape/values, "
+                "throughput, parameter count, or any numeric result. Write these as the metrics JSON. "
+                "Do NOT just verify that the repo installs or imports — actually execute the model. "
+                "If the repo has no runnable demo or example, mark benchmarkable=false."
             ),
         )
 

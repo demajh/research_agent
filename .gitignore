@@ -6,3 +6,4 @@ __pycache__/
 .env
 configs/interests.yaml
 *.db
+service_account.json

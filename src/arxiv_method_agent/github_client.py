@@ -19,7 +19,7 @@ from .schemas import PaperRecord, RepoInspection
 from .utils import ensure_dir, list_root_files, repo_name_from_url, safe_read_text, slugify, truncate
 
 GITHUB_API = "https://api.github.com"
-MAX_CLONE_BYTES = 500 * 1024 * 1024  # 500 MB
+MAX_CLONE_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
 
 
 class GitHubClient:
@@ -74,7 +74,7 @@ class GitHubClient:
             if clone_size > MAX_CLONE_BYTES:
                 shutil.rmtree(local_path)
                 raise ValueError(
-                    f"Cloned repo exceeds size limit: {clone_size / (1024 * 1024):.0f}MB > 500MB"
+                    f"Cloned repo exceeds size limit: {clone_size / (1024 * 1024):.0f}MB > 10GB"
                 )
         root_files = list_root_files(local_path)
         dependency_files = [
